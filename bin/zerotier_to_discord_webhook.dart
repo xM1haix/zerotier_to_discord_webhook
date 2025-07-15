@@ -1,62 +1,76 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 Future<void> main() async {
+  final discord = Discord();
+  await discord.report("Starting the HTTP Server");
   final server = await HttpServer.bind(InternetAddress.anyIPv4, 8081);
-  final client = HttpClient();
-  final uri = Uri.parse('MY DISCORD WEBHOOK LINK HERE');
+  await discord.report("Server started.\nWaiting for requests");
   await for (final HttpRequest req in server) {
-    if (req.method != 'POST') continue;
+    if (req.method != 'POST') {
+      await discord.report("Request is not POST: ${req.method}");
+      continue;
+    }
+    await discord.report("Request retrived");
     try {
       final body = await utf8.decoder.bind(req).join();
-      final p = jsonDecode(body) as Map<String, dynamic>;
-      final h = p['hook_type'] as String?;
-      final message = switch (h) {
-        'NETWORK_JOIN' =>
-          '🔔 **NETWORK_JOIN**\nNetwork: `${p['network_id']}`\nNew Member: `${p['member_id']}`',
-        'NETWORK_AUTH' =>
-          '✅ **NETWORK_AUTH**\nNetwork: `${p['network_id']}`\nMember: `${p['member_id']}`\nBy: `${p['user_email']}`',
-        'NETWORK_DEAUTH' =>
-          '🚫 **NETWORK_DEAUTH**\nNetwork: `${p['network_id']}`\nMember: `${p['member_id']}`\nBy: `${p['user_email']}`',
-        'NETWORK_SSO_LOGIN' =>
-          '🔑 **SSO LOGIN**\nNetwork: `${p['network_id']}`\nMember: `${p['member_id']}`\nUser: `${p['sso_user_email']}`',
-        'NETWORK_SSO_LOGIN_ERROR' =>
-          '⚠️ **SSO LOGIN ERROR**\nNetwork: `${p['network_id']}`\nUser: `${p['sso_user_email']}`\nError: `${p['error']}`',
-        'NETWORK_CREATED' =>
-          '🆕 **NETWORK_CREATED**\nNetwork ID: `${p['network_id']}`\nBy: `${p['user_email']}`',
-        'NETWORK_CONFIG_CHANGED' =>
-          '📝 **NETWORK_CONFIG_CHANGED**\nNetwork: `${p['network_id']}`\nBy: `${p['user_email']}`',
-        'NETWORK_DELETED' =>
-          '💀 **NETWORK_DELETED**\nNetwork ID: `${p['network_id']}`\nBy: `${p['user_email']}`',
-        'MEMBER_CONFIG_CHANGED' =>
-          '🛠️ **MEMBER_CONFIG_CHANGED**\nNetwork: `${p['network_id']}`\nMember: `${p['member_id']}`\nBy: `${p['user_email']}`',
-        'MEMBER_DELETED' =>
-          '🗑️ **MEMBER_DELETED**\nNetwork: `${p['network_id']}`\nMember: `${p['member_id']}`\nBy: `${p['user_email']}`',
-        'ORG_INVITE_SENT' =>
-          '✉️ **ORG_INVITE_SENT**\nTo: `${p['invitee_email']}`\nBy: `${p['user_id']}`',
-        'ORG_INVITE_ACCEPTED' =>
-          '🙋 **ORG_INVITE_ACCEPTED**\nUser: `${p['user_email']}`',
-        'ORG_INVITE_REJECTED' =>
-          '🙅 **ORG_INVITE_REJECTED**\nUser: `${p['user_email']}`',
-        'ORG_MEMBER_REMOVED' =>
-          '🚷 **ORG_MEMBER_REMOVED**\nUser: `${p['removed_user_email']}`\nBy: `${p['user_id']}`',
-        _ => '❓ Unknown hook_type: `$h`',
-      };
-      final request = await client.postUrl(uri);
-      request.headers.contentType = ContentType.json;
-      final payload = jsonEncode({'content': message});
-      request.write(payload);
-      final response = await request.close();
-      if (response.statusCode != 204) {
-        final responseBody = await utf8.decoder.bind(response).join();
-        throw '⚠️ Discord webhook error: ${response.statusCode} $responseBody';
-      }
+      discord.report(body);
+      await discord.sendMSG(
+        "```json\n${JsonEncoder.withIndent('  ').convert(jsonDecode(body) as Map<String, dynamic>)}\n```",
+      );
       req.response
         ..statusCode = HttpStatus.ok
         ..write('ok')
         ..close();
-    } catch (e) {
+    } catch (e, stack) {
+      await discord.report("```\n$e\n$stack\n```");
       print(e);
     }
   }
+}
+
+class Discord {
+  static Discord? _instance;
+
+  static final _client = HttpClient();
+  static final _msgUri = Uri.parse('PUT FIRST TOKEN HERE');
+  static final _reportUri = Uri.parse('PUT SECOND TOKEN HERE');
+  static Discord get instance => Discord();
+  factory Discord() => _instance ??= Discord._internal();
+  Discord._internal();
+  void dispose() => _client.close(force: true);
+  Future<void> report(String msg) => _send(msg, false);
+  Future<void> sendMSG(String msg) => _send(msg);
+  Future<void> _send(String msg, [bool isOk = true]) async {
+    try {
+      final request = await _client.postUrl(isOk ? _msgUri : _reportUri);
+      request
+        ..headers.contentType = ContentType.json
+        ..headers.set(
+          'User-Agent',
+          'ZeroTierToDiscord/1.0 (+https://github.com/xM1haix/zerotier_to_discord_webhook)',
+        )
+        ..write(jsonEncode({'content': msg}));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+
+      if (response.statusCode != 204) {
+        final body = await utf8.decoder.bind(response).join();
+        throw DiscordWebhookException(response.statusCode, body);
+      }
+    } on TimeoutException {
+      throw DiscordWebhookException(-1, 'Request timed out');
+    }
+  }
+}
+
+class DiscordWebhookException implements Exception {
+  final int statusCode;
+  final String body;
+  DiscordWebhookException(this.statusCode, this.body);
+  @override
+  String toString() =>
+      'DiscordWebhookException(statusCode: $statusCode, body: $body)';
 }
