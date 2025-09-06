@@ -1,6 +1,6 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+import "dart:async";
+import "dart:convert";
+import "dart:io";
 
 Future<void> main() async {
   final discord = Discord();
@@ -8,21 +8,22 @@ Future<void> main() async {
   final server = await HttpServer.bind(InternetAddress.anyIPv4, 8081);
   await discord.report("Server started.\nWaiting for requests");
   await for (final HttpRequest req in server) {
-    if (req.method != 'POST') {
+    if (req.method != "POST") {
       await discord.report("Request is not POST: ${req.method}");
       continue;
     }
     await discord.report("Request retrived");
     try {
       final body = await utf8.decoder.bind(req).join();
-      discord.report(body);
-      await discord.sendMSG(
-        "```json\n${JsonEncoder.withIndent('  ').convert(jsonDecode(body) as Map<String, dynamic>)}\n```",
-      );
+      unawaited(discord.report(body));
+      final x = const JsonEncoder.withIndent(
+        "  ",
+      ).convert(jsonDecode(body) as Map<String, dynamic>);
+      await discord.sendMSG("```json\n$x\n```");
       req.response
         ..statusCode = HttpStatus.ok
-        ..write('ok')
-        ..close();
+        ..write("ok");
+      await req.response.close();
     } catch (e, stack) {
       await discord.report("```\n$e\n$stack\n```");
       print(e);
@@ -31,14 +32,14 @@ Future<void> main() async {
 }
 
 class Discord {
-  static Discord? _instance;
-
-  static final _client = HttpClient();
-  static final _msgUri = Uri.parse('PUT FIRST TOKEN HERE');
-  static final _reportUri = Uri.parse('PUT SECOND TOKEN HERE');
-  static Discord get instance => Discord();
   factory Discord() => _instance ??= Discord._internal();
+
   Discord._internal();
+  static Discord? _instance;
+  static final _client = HttpClient();
+  static final _msgUri = Uri.parse("PUT FIRST TOKEN HERE");
+  static final _reportUri = Uri.parse("PUT SECOND TOKEN HERE");
+  static Discord get instance => Discord();
   void dispose() => _client.close(force: true);
   Future<void> report(String msg) => _send(msg, false);
   Future<void> sendMSG(String msg) => _send(msg);
@@ -48,10 +49,10 @@ class Discord {
       request
         ..headers.contentType = ContentType.json
         ..headers.set(
-          'User-Agent',
-          'ZeroTierToDiscord/1.0 (+https://github.com/xM1haix/zerotier_to_discord_webhook)',
+          "User-Agent",
+          "ZeroTierToDiscord/1.0 (+https://github.com/xM1haix/zerotier_to_discord_webhook)",
         )
-        ..write(jsonEncode({'content': msg}));
+        ..write(jsonEncode({"content": msg}));
       final response = await request.close().timeout(
         const Duration(seconds: 5),
       );
@@ -61,16 +62,16 @@ class Discord {
         throw DiscordWebhookException(response.statusCode, body);
       }
     } on TimeoutException {
-      throw DiscordWebhookException(-1, 'Request timed out');
+      throw DiscordWebhookException(-1, "Request timed out");
     }
   }
 }
 
 class DiscordWebhookException implements Exception {
+  DiscordWebhookException(this.statusCode, this.body);
   final int statusCode;
   final String body;
-  DiscordWebhookException(this.statusCode, this.body);
   @override
   String toString() =>
-      'DiscordWebhookException(statusCode: $statusCode, body: $body)';
+      "DiscordWebhookException(statusCode: $statusCode, body: $body)";
 }
